@@ -9,53 +9,71 @@ public class UDPManager : MonoBehaviour
 {
     [Header("Network Settings")]
     public string targetIP = "127.0.0.1";
-    public int sendPort = 9999;
-    public int receivePort = 9998;
+    public int sendPort = 12222;
+    public int receivePort = 12223;
 
-    protected UdpClient udpClient;
-    protected IPEndPoint sendEndPoint;
-    protected Thread receiveThread;
-    protected bool isReceiving = true;
+    [Header("Debug")]
+    public bool enableDebugLogs = true;
 
-    protected virtual void Start()
+    // Network components
+    private UdpClient udpClient;
+    private IPEndPoint sendEndPoint;
+    private Thread receiveThread;
+    private bool isReceiving = true;
+
+    // Events
+    public event Action<string> OnDataReceived;
+    public event Action<string> OnNetworkError;
+    public event Action OnNetworkConnected;
+    public event Action OnNetworkDisconnected;
+
+    // Statistics
+    private int sentMessageCount = 0;
+    private int receivedMessageCount = 0;
+    private int errorCount = 0;
+
+    public int SentMessageCount => sentMessageCount;
+    public int ReceivedMessageCount => receivedMessageCount;
+    public int ErrorCount => errorCount;
+    public bool IsConnected => udpClient != null;
+
+    private void Start()
     {
-        InitializeUDP();
-        StartReceiveThread();
+        InitializeNetwork();
     }
 
-    protected virtual void InitializeUDP()
+    public void InitializeNetwork()
     {
         try
         {
+            // Send endpoint 설정
             sendEndPoint = new IPEndPoint(IPAddress.Parse(targetIP), sendPort);
+
+            // UDP 클라이언트 생성 및 바인딩
             udpClient = new UdpClient(receivePort);
 
-            Debug.Log($"UDP initialized - Send: {sendPort}, Receive: {receivePort}");
+            // 수신 스레드 시작
+            StartReceiveThread();
+
+            OnNetworkConnected?.Invoke();
+            LogDebug($"Network initialized - Send to: {targetIP}:{sendPort}, Listen on: {receivePort}");
         }
         catch (Exception e)
         {
-            Debug.LogError($"UDP initialization failed: {e.Message}");
+            errorCount++;
+            string errorMsg = $"Network initialization failed: {e.Message}";
+            LogError(errorMsg);
+            OnNetworkError?.Invoke(errorMsg);
         }
     }
 
-    protected void StartReceiveThread()
+    private void StartReceiveThread()
     {
         receiveThread = new Thread(ReceiveData);
         receiveThread.IsBackground = true;
         receiveThread.Start();
-    }
 
-    protected void SendData(string data)
-    {
-        try
-        {
-            byte[] bytes = Encoding.UTF8.GetBytes(data);
-            udpClient.Send(bytes, bytes.Length, sendEndPoint);
-        }
-        catch (Exception e)
-        {
-            Debug.LogError($"Send failed: {e.Message}");
-        }
+        LogDebug("Receive thread started");
     }
 
     private void ReceiveData()
@@ -66,31 +84,124 @@ public class UDPManager : MonoBehaviour
             {
                 IPEndPoint remoteEndPoint = new IPEndPoint(IPAddress.Any, 0);
                 byte[] data = udpClient.Receive(ref remoteEndPoint);
-                string jsonData = Encoding.UTF8.GetString(data);
+                string receivedData = Encoding.UTF8.GetString(data);
 
-                OnDataReceived(jsonData);
+                receivedMessageCount++;
+                LogDebug($"[RECEIVED #{receivedMessageCount}] From {remoteEndPoint}: {receivedData}");
+
+                // 메인 스레드에서 이벤트 호출
+                UnityMainThreadDispatcher.Instance.Enqueue(() => {
+                    OnDataReceived?.Invoke(receivedData);
+                });
             }
             catch (Exception e)
             {
                 if (isReceiving)
                 {
-                    Debug.LogError($"Receive failed: {e.Message}");
+                    errorCount++;
+                    string errorMsg = $"Receive failed: {e.Message}";
+                    LogError(errorMsg);
+
+                    UnityMainThreadDispatcher.Instance.Enqueue(() => {
+                        OnNetworkError?.Invoke(errorMsg);
+                    });
                 }
             }
         }
     }
 
-    // abstract에서 virtual로 변경하고 기본 구현 제공
-    protected virtual void OnDataReceived(string jsonData)
+    public void SendData(string data)
     {
-        Debug.Log($"Data received: {jsonData}");
-        // 기본 구현 - 하위 클래스에서 오버라이드 가능
+        if (udpClient == null || sendEndPoint == null)
+        {
+            string errorMsg = "Network not initialized";
+            LogError(errorMsg);
+            OnNetworkError?.Invoke(errorMsg);
+            return;
+        }
+
+        try
+        {
+            byte[] bytes = Encoding.UTF8.GetBytes(data);
+            udpClient.Send(bytes, bytes.Length, sendEndPoint);
+
+            sentMessageCount++;
+            LogDebug($"[SENT #{sentMessageCount}] To {targetIP}:{sendPort}: {data}");
+        }
+        catch (Exception e)
+        {
+            errorCount++;
+            string errorMsg = $"Send failed: {e.Message}";
+            LogError(errorMsg);
+            OnNetworkError?.Invoke(errorMsg);
+        }
     }
 
-    protected virtual void OnApplicationQuit()
+    public void UpdateTargetIP(string newIP)
+    {
+        targetIP = newIP;
+        sendEndPoint = new IPEndPoint(IPAddress.Parse(targetIP), sendPort);
+        LogDebug($"Target IP updated to: {targetIP}");
+    }
+
+    public void UpdateSendPort(int newPort)
+    {
+        sendPort = newPort;
+        sendEndPoint = new IPEndPoint(IPAddress.Parse(targetIP), sendPort);
+        LogDebug($"Send port updated to: {sendPort}");
+    }
+
+    public void Disconnect()
     {
         isReceiving = false;
-        receiveThread?.Join(1000);
-        udpClient?.Close();
+
+        if (receiveThread != null && receiveThread.IsAlive)
+        {
+            receiveThread.Join(1000);
+        }
+
+        if (udpClient != null)
+        {
+            udpClient.Close();
+            udpClient = null;
+        }
+
+        OnNetworkDisconnected?.Invoke();
+        LogDebug("Network disconnected");
+    }
+
+    public void Reconnect()
+    {
+        Disconnect();
+        InitializeNetwork();
+    }
+
+    private void LogDebug(string message)
+    {
+        if (enableDebugLogs)
+        {
+            Debug.Log($"[UDPManager] {message}");
+        }
+    }
+
+    private void LogError(string message)
+    {
+        Debug.LogError($"[UDPManager] {message}");
+    }
+
+    private void OnApplicationQuit()
+    {
+        Disconnect();
+    }
+
+    private void OnDestroy()
+    {
+        Disconnect();
+    }
+
+    // 상태 정보 출력
+    public string GetStatusInfo()
+    {
+        return $"Connected: {IsConnected}, Sent: {sentMessageCount}, Received: {receivedMessageCount}, Errors: {errorCount}";
     }
 }

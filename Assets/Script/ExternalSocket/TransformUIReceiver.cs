@@ -1,18 +1,11 @@
-using System;
-using System.Net;
-using System.Net.Sockets;
-using System.Text;
-using System.Threading;
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
 
 public class TransformUIReceiver : MonoBehaviour
 {
-    [Header("Network Settings")]
-    public string targetIP = "10.244.88.252";   // Scene1 IP
-    public int sendPort = 12223;                // Scene1로 전송할 포트
-    public int receivePort = 12222;             // Scene1에서 받을 포트
+    [Header("Network")]
+    public UDPManager udpManager;
 
     [Header("UI Controller")]
     public TransformUIController uiController;
@@ -24,28 +17,17 @@ public class TransformUIReceiver : MonoBehaviour
 
     [Header("Debug Settings")]
     public bool enableDebugLogs = true;
-    public TMP_Text debugLogText;  // 실시간 디버그 로그 표시용
-
-    // Network
-    private UdpClient udpClient;
-    private IPEndPoint sendEndPoint;
-    private Thread receiveThread;
-    private bool isReceiving = true;
+    public TMP_Text debugLogText;
 
     // Message handling
     private const string SENDER_ID = "SCENE2_UI";
-    private TransformMessage lastReceivedMessage;
-    private bool hasNewMessage = false;
-
-    // Debug
-    private int receivedMessageCount = 0;
     private int validMessageCount = 0;
     private int errorMessageCount = 0;
 
     private void Start()
     {
         InitializeComponents();
-        InitializeNetwork();
+        SetupNetworkEvents();
     }
 
     private void InitializeComponents()
@@ -55,9 +37,21 @@ public class TransformUIReceiver : MonoBehaviour
             uiController.SetReceiver(this);
         }
 
+        if (udpManager == null)
+        {
+            //udpManager = FindObjectOfType<UDPManager>();
+            udpManager = FindFirstObjectByType<UDPManager>();
+
+            if (udpManager == null)
+            {
+                GameObject udpGO = new GameObject("UDPManager");
+                udpManager = udpGO.AddComponent<UDPManager>();
+            }
+        }
+
         if (ipInputField != null)
         {
-            ipInputField.text = targetIP;
+            ipInputField.text = udpManager.targetIP;
         }
 
         if (connectButton != null)
@@ -68,169 +62,98 @@ public class TransformUIReceiver : MonoBehaviour
         LogDebug("UI Components initialized");
     }
 
-    private void InitializeNetwork()
+    private void SetupNetworkEvents()
+    {
+        if (udpManager != null)
+        {
+            udpManager.OnDataReceived += OnDataReceived;
+            udpManager.OnNetworkError += OnNetworkError;
+            udpManager.OnNetworkConnected += OnNetworkConnected;
+            udpManager.OnNetworkDisconnected += OnNetworkDisconnected;
+        }
+    }
+
+    private void OnDataReceived(string csvData)
     {
         try
         {
-            sendEndPoint = new IPEndPoint(IPAddress.Parse(targetIP), sendPort);
-            udpClient = new UdpClient(receivePort);
+            LogDebug($"[RECEIVED CSV] {csvData}");
 
-            StartReceiveThread();
-            UpdateStatus("Network initialized - Ready to control");
+            TransformMessage message = TransformMessage.FromCSV(csvData);
 
-            LogDebug($"Network initialized - Target: {targetIP}:{sendPort}, Listen: {receivePort}");
-        }
-        catch (Exception e)
-        {
-            UpdateStatus($"Network Error: {e.Message}");
-            LogError($"Network initialization failed: {e.Message}");
-        }
-    }
-
-    private void StartReceiveThread()
-    {
-        receiveThread = new Thread(ReceiveData);
-        receiveThread.IsBackground = true;
-        receiveThread.Start();
-
-        LogDebug("Receive thread started - Waiting for data from Scene1...");
-    }
-
-    private void ReceiveData()
-    {
-        while (isReceiving)
-        {
-            try
+            if (message != null && message.transformData != null)
             {
-                IPEndPoint remoteEndPoint = new IPEndPoint(IPAddress.Any, 0);
-                byte[] data = udpClient.Receive(ref remoteEndPoint);
-                string jsonData = Encoding.UTF8.GetString(data);
-
-                LogDebug($"Raw data received from {remoteEndPoint} - Size: {data.Length} bytes");
-                ProcessReceivedData(jsonData, remoteEndPoint);
-            }
-            catch (Exception e)
-            {
-                if (isReceiving)
+                if (message.senderType == "SCENE1_CONTROLLER")
                 {
-                    LogError($"Receive failed: {e.Message}");
-                }
-            }
-        }
-    }
+                    validMessageCount++;
 
-    private void ProcessReceivedData(string jsonData, IPEndPoint senderEndPoint)
-    {
-        receivedMessageCount++;
+                    LogDebug($"[VALID CSV MESSAGE] From Scene1: {message.transformData.ToString()}");
 
-        try
-        {
-            LogDebug($"[MESSAGE #{receivedMessageCount}] Processing data from {senderEndPoint}:");
-            LogDebug($"[JSON RAW] {jsonData}");
+                    if (uiController != null)
+                    {
+                        uiController.UpdateUIFromNetwork(message.transformData);
+                    }
 
-            TransformMessage message = TransformMessage.FromJson(jsonData);
-
-            if (message == null)
-            {
-                errorMessageCount++;
-                LogError("[PARSE ERROR] Message is null after JSON parsing");
-                return;
-            }
-
-            if (message.transformData == null)
-            {
-                errorMessageCount++;
-                LogError("[PARSE ERROR] Transform data is null in message");
-                return;
-            }
-
-            LogDebug($"[PARSED] Sender: {message.senderType}, Timestamp: {message.timestamp}");
-            LogDebug($"[TRANSFORM DATA] {message.transformData.ToString()}");
-
-            // Scene1에서 온 메시지만 처리
-            if (message.senderType == "SCENE1_CONTROLLER")
-            {
-                validMessageCount++;
-
-                lock (this)
-                {
-                    lastReceivedMessage = message;
-                    hasNewMessage = true;
-                }
-
-                LogDebug($"[VALID MESSAGE] From Scene1 - Total valid: {validMessageCount}");
-                LogDebug($"[POSITION] X:{message.transformData.posX:F2}, Y:{message.transformData.posY:F2}, Z:{message.transformData.posZ:F2}");
-                LogDebug($"[ROTATION] X:{message.transformData.rotX:F2}, Y:{message.transformData.rotY:F2}, Z:{message.transformData.rotZ:F2}");
-                LogDebug($"[SCALE] X:{message.transformData.scaleX:F2}, Y:{message.transformData.scaleY:F2}, Z:{message.transformData.scaleZ:F2}");
-            }
-            else
-            {
-                LogDebug($"[IGNORED] Message from: {message.senderType} (not Scene1)");
-            }
-        }
-        catch (Exception e)
-        {
-            errorMessageCount++;
-            LogError($"[JSON PARSE ERROR] {e.Message}");
-            LogError($"[RAW JSON] {jsonData}");
-            LogError($"[SENDER] {senderEndPoint}");
-        }
-    }
-
-    private void Update()
-    {
-        // 받은 데이터를 UI에 반영
-        if (hasNewMessage && lastReceivedMessage != null)
-        {
-            lock (this)
-            {
-                LogDebug("[UI UPDATE] Applying received data to UI...");
-
-                if (uiController != null)
-                {
-                    LogDebug("[UI UPDATE] Calling uiController.UpdateUIFromNetwork()");
-                    uiController.UpdateUIFromNetwork(lastReceivedMessage.transformData);
-                    LogDebug("[UI UPDATE] UI successfully updated");
+                    UpdateStatus($"Applied CSV: {message.transformData.ToString()}");
                 }
                 else
                 {
-                    LogError("[UI UPDATE] uiController is null!");
+                    LogDebug($"[IGNORED] Message from: {message.senderType}");
                 }
-
-                string statusMsg = $"Applied: {lastReceivedMessage.transformData.ToString()}";
-                UpdateStatus(statusMsg);
-                UpdateDebugDisplay();
-
-                hasNewMessage = false;
-                LogDebug("[UI UPDATE] Update cycle completed");
+            }
+            else
+            {
+                errorMessageCount++;
+                LogError("Invalid message received");
             }
         }
+        catch (System.Exception e)
+        {
+            errorMessageCount++;
+            LogError($"Error processing received data: {e.Message}");
+        }
+
+        UpdateDebugDisplay();
+    }
+
+    private void OnNetworkError(string error)
+    {
+        UpdateStatus($"Network Error: {error}");
+        LogError($"Network error: {error}");
+    }
+
+    private void OnNetworkConnected()
+    {
+        UpdateStatus("Network Connected");
+        LogDebug("Network connected");
+    }
+
+    private void OnNetworkDisconnected()
+    {
+        UpdateStatus("Network Disconnected");
+        LogDebug("Network disconnected");
     }
 
     // TransformUIController에서 호출하는 메서드
     public void SendUIData(TransformData data)
     {
-        if (udpClient == null || sendEndPoint == null)
+        if (udpManager == null)
         {
-            LogError("Network not initialized for sending!");
+            LogError("UDP Manager is null!");
             return;
         }
 
         try
         {
             TransformMessage message = new TransformMessage(data, SENDER_ID);
-            string jsonData = message.ToJson();
+            string csvData = message.ToCSV();
 
-            LogDebug($"[SENDING] To Scene1 ({targetIP}:{sendPort}):");
-            LogDebug($"[SENDING JSON] {jsonData}");
+            LogDebug($"[SENDING CSV] {csvData}");
 
-            byte[] bytes = Encoding.UTF8.GetBytes(jsonData);
-            udpClient.Send(bytes, bytes.Length, sendEndPoint);
-
-            UpdateStatus($"Sent: {data.ToString()}");
-            LogDebug($"[SENT] {bytes.Length} bytes successfully sent to Scene1");
+            udpManager.SendData(csvData);
+            UpdateStatus($"Sent CSV: {data.ToString()}");
         }
-        catch (Exception e)
+        catch (System.Exception e)
         {
             LogError($"Send failed: {e.Message}");
         }
@@ -238,12 +161,10 @@ public class TransformUIReceiver : MonoBehaviour
 
     private void UpdateTargetIP()
     {
-        if (ipInputField != null)
+        if (ipInputField != null && udpManager != null)
         {
-            targetIP = ipInputField.text;
-            sendEndPoint = new IPEndPoint(IPAddress.Parse(targetIP), sendPort);
-            UpdateStatus($"Target IP updated to: {targetIP}");
-            LogDebug($"Target IP updated to: {targetIP}");
+            udpManager.UpdateTargetIP(ipInputField.text);
+            UpdateStatus($"Target IP updated to: {ipInputField.text}");
         }
     }
 
@@ -257,9 +178,9 @@ public class TransformUIReceiver : MonoBehaviour
 
     private void UpdateDebugDisplay()
     {
-        if (debugLogText != null)
+        if (debugLogText != null && udpManager != null)
         {
-            debugLogText.text = $"Received: {receivedMessageCount} | Valid: {validMessageCount} | Errors: {errorMessageCount}";
+            debugLogText.text = $"Valid: {validMessageCount} | Errors: {errorMessageCount} | {udpManager.GetStatusInfo()}";
         }
     }
 
@@ -267,57 +188,23 @@ public class TransformUIReceiver : MonoBehaviour
     {
         if (enableDebugLogs)
         {
-            Debug.Log($"[SCENE2-RECEIVER] {message}");
+            Debug.Log($"[SCENE2-CSV-RECEIVER] {message}");
         }
     }
 
     private void LogError(string message)
     {
-        Debug.LogError($"[SCENE2-RECEIVER] {message}");
+        Debug.LogError($"[SCENE2-CSV-RECEIVER] {message}");
     }
 
-    private void OnApplicationQuit()
+    private void OnDestroy()
     {
-        isReceiving = false;
-        receiveThread?.Join(1000);
-        udpClient?.Close();
-
-        LogDebug("Application quit - Network closed");
-    }
-
-    // 테스트 및 디버그용 메서드들
-    [ContextMenu("Send Test Data")]
-    public void SendTestData()
-    {
-        TransformData testData = new TransformData();
-        testData.posX = 1f; testData.posY = 2f; testData.posZ = 3f;
-        testData.rotX = 45f; testData.rotY = 90f; testData.rotZ = 0f;
-        testData.scaleX = 1.5f; testData.scaleY = 1.5f; testData.scaleZ = 1.5f;
-
-        LogDebug("[TEST] Sending test data to Scene1");
-        SendUIData(testData);
-    }
-
-    [ContextMenu("Print Network Status")]
-    public void PrintNetworkStatus()
-    {
-        LogDebug($"=== NETWORK STATUS ===");
-        LogDebug($"Target IP: {targetIP}:{sendPort}");
-        LogDebug($"Listen Port: {receivePort}");
-        LogDebug($"UDP Client: {(udpClient != null ? "Connected" : "Null")}");
-        LogDebug($"Receive Thread: {(receiveThread != null && receiveThread.IsAlive ? "Running" : "Stopped")}");
-        LogDebug($"Messages - Total: {receivedMessageCount}, Valid: {validMessageCount}, Errors: {errorMessageCount}");
-        LogDebug($"UI Controller: {(uiController != null ? "Connected" : "Null")}");
-        LogDebug($"======================");
-    }
-
-    [ContextMenu("Clear Debug Counters")]
-    public void ClearDebugCounters()
-    {
-        receivedMessageCount = 0;
-        validMessageCount = 0;
-        errorMessageCount = 0;
-        UpdateDebugDisplay();
-        LogDebug("Debug counters cleared");
+        if (udpManager != null)
+        {
+            udpManager.OnDataReceived -= OnDataReceived;
+            udpManager.OnNetworkError -= OnNetworkError;
+            udpManager.OnNetworkConnected -= OnNetworkConnected;
+            udpManager.OnNetworkDisconnected -= OnNetworkDisconnected;
+        }
     }
 }

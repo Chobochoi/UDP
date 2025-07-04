@@ -1,10 +1,10 @@
 // TransformData.cs
 using UnityEngine;
+using System.Globalization;
 
 [System.Serializable]
 public class TransformData
 {
-    // Vector3 대신 개별 float 사용
     public float posX, posY, posZ;
     public float rotX, rotY, rotZ;
     public float scaleX, scaleY, scaleZ;
@@ -56,14 +56,49 @@ public class TransformData
     public void SetRotation(Vector3 rot) { rotX = rot.x; rotY = rot.y; rotZ = rot.z; }
     public void SetScale(Vector3 scale) { scaleX = scale.x; scaleY = scale.y; scaleZ = scale.z; }
 
-    public string ToJson()
+    // CSV 변환 메서드
+    public string ToCSV()
     {
-        return JsonUtility.ToJson(this);
+        return $"{posX.ToString("F3", CultureInfo.InvariantCulture)}," +
+               $"{posY.ToString("F3", CultureInfo.InvariantCulture)}," +
+               $"{posZ.ToString("F3", CultureInfo.InvariantCulture)}," +
+               $"{rotX.ToString("F3", CultureInfo.InvariantCulture)}," +
+               $"{rotY.ToString("F3", CultureInfo.InvariantCulture)}," +
+               $"{rotZ.ToString("F3", CultureInfo.InvariantCulture)}," +
+               $"{scaleX.ToString("F3", CultureInfo.InvariantCulture)}," +
+               $"{scaleY.ToString("F3", CultureInfo.InvariantCulture)}," +
+               $"{scaleZ.ToString("F3", CultureInfo.InvariantCulture)}";
     }
 
-    public static TransformData FromJson(string json)
+    public static TransformData FromCSV(string csvData)
     {
-        return JsonUtility.FromJson<TransformData>(json);
+        try
+        {
+            string[] values = csvData.Split(',');
+            if (values.Length < 9)
+            {
+                Debug.LogError($"CSV data incomplete: {csvData}");
+                return new TransformData();
+            }
+
+            TransformData data = new TransformData();
+            data.posX = float.Parse(values[0], CultureInfo.InvariantCulture);
+            data.posY = float.Parse(values[1], CultureInfo.InvariantCulture);
+            data.posZ = float.Parse(values[2], CultureInfo.InvariantCulture);
+            data.rotX = float.Parse(values[3], CultureInfo.InvariantCulture);
+            data.rotY = float.Parse(values[4], CultureInfo.InvariantCulture);
+            data.rotZ = float.Parse(values[5], CultureInfo.InvariantCulture);
+            data.scaleX = float.Parse(values[6], CultureInfo.InvariantCulture);
+            data.scaleY = float.Parse(values[7], CultureInfo.InvariantCulture);
+            data.scaleZ = float.Parse(values[8], CultureInfo.InvariantCulture);
+
+            return data;
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogError($"Error parsing CSV: {e.Message}, Data: {csvData}");
+            return new TransformData();
+        }
     }
 
     public override string ToString()
@@ -93,13 +128,38 @@ public class TransformMessage
         timestamp = Time.time;
     }
 
-    public string ToJson()
+    // CSV 형식: senderType,posX,posY,posZ,rotX,rotY,rotZ,scaleX,scaleY,scaleZ,timestamp
+    public string ToCSV()
     {
-        return JsonUtility.ToJson(this);
+        return $"{senderType},{transformData.ToCSV()},{timestamp.ToString("F3", CultureInfo.InvariantCulture)}";
     }
 
-    public static TransformMessage FromJson(string json)
+    public static TransformMessage FromCSV(string csvData)
     {
-        return JsonUtility.FromJson<TransformMessage>(json);
+        try
+        {
+            string[] parts = csvData.Split(',');
+            if (parts.Length < 11)
+            {
+                Debug.LogError($"CSV message incomplete: {csvData}");
+                return new TransformMessage();
+            }
+
+            TransformMessage message = new TransformMessage();
+            message.senderType = parts[0];
+
+            // TransformData 파싱 (1~9번 인덱스)
+            string transformCSV = string.Join(",", parts, 1, 9);
+            message.transformData = TransformData.FromCSV(transformCSV);
+
+            message.timestamp = float.Parse(parts[10], CultureInfo.InvariantCulture);
+
+            return message;
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogError($"Error parsing CSV message: {e.Message}, Data: {csvData}");
+            return new TransformMessage();
+        }
     }
 }

@@ -34,7 +34,7 @@ public class TransformUIController : MonoBehaviour
     [Header("Control Buttons")]
     public Button sendButton;
     public Button resetButton;
-    public Button testValuesButton;  // 테스트 값 설정 버튼
+    //public Button testValuesButton; // 통신 테스트를 위한 버튼. 테스트 완료하여 주석처리.
     public Toggle realtimeToggle;
 
     [Header("Settings")]
@@ -58,7 +58,7 @@ public class TransformUIController : MonoBehaviour
         SetupButtons();
         SetupToggles();
 
-        LogDebug("UI Controller initialized");
+        LogDebug("CSV UI Controller initialized");
     }
 
     private void SetupSliders()
@@ -89,7 +89,7 @@ public class TransformUIController : MonoBehaviour
         scaleYSlider.onValueChanged.AddListener(value => OnSliderChanged("ScaleY", value));
         scaleZSlider.onValueChanged.AddListener(value => OnSliderChanged("ScaleZ", value));
 
-        LogDebug("Sliders setup completed");
+        LogDebug("CSV Sliders setup completed");
     }
 
     private void SetupButtons()
@@ -100,41 +100,42 @@ public class TransformUIController : MonoBehaviour
         if (resetButton != null)
             resetButton.onClick.AddListener(ResetToDefault);
 
-        if (testValuesButton != null)
-            testValuesButton.onClick.AddListener(SetTestValues);
+        //if (testValuesButton != null)
+        //    testValuesButton.onClick.AddListener(SetTestValues);
 
-        LogDebug("Buttons setup completed");
-    }
+        LogDebug("CSV Buttons setup completed");
+    }   
 
     private void SetupToggles()
     {
         if (realtimeToggle != null)
-        {
+        {            
             realtimeToggle.isOn = realtimeSync;
+
             realtimeToggle.onValueChanged.AddListener(SetRealtimeSync);
         }
 
-        LogDebug("Toggles setup completed");
+        LogDebug("CSV Toggles setup completed");
     }
 
     private void OnSliderChanged(string sliderName, float value)
     {
         if (isUpdatingFromNetwork)
         {
-            LogDebug($"[SLIDER] {sliderName} changed to {value:F2} (from network - ignored)");
+            LogDebug($"[CSV SLIDER] {sliderName} changed to {value:F2} (from CSV network - ignored)");
             return;
         }
 
-        LogDebug($"[SLIDER] {sliderName} changed to {value:F2} (user input)");
+        LogDebug($"[CSV SLIDER] {sliderName} changed to {value:F2} (user input)");
 
         // 텍스트 업데이트
         UpdateTextForSlider(sliderName, value);
 
-        // 실시간 동기화가 활성화되어 있으면 즉시 전송
+        // 실시간 동기화가 활성화되어 있으면 즉시 전송        
         if (realtimeSync)
         {
-            LogDebug($"[REALTIME] Sending due to slider change: {sliderName}");
-            SendCurrentData();
+            LogDebug($"[CSV REALTIME] Sending due to slider change: {sliderName}");
+            SendCurrentData();            
         }
     }
 
@@ -164,14 +165,14 @@ public class TransformUIController : MonoBehaviour
 
         if (isUpdatingFromNetwork)
         {
-            LogDebug("[SEND] Skipping send - updating from network");
+            LogDebug("[CSV SEND] Skipping send - updating from CSV network");
             return;
         }
 
         TransformData currentData = GetCurrentUIData();
         sentMessageCount++;
 
-        LogDebug($"[SEND #{sentMessageCount}] Sending current UI data: {currentData.ToString()}");
+        LogDebug($"[CSV SEND #{sentMessageCount}] Sending current UI data as CSV: {currentData.ToString()}");
         receiver.SendUIData(currentData);
 
         UpdateDebugDisplay();
@@ -200,7 +201,7 @@ public class TransformUIController : MonoBehaviour
     {
         uiUpdateCount++;
 
-        LogDebug($"[UPDATE #{uiUpdateCount}] UpdateUIFromNetwork called with: {data.ToString()}");
+        LogDebug($"[CSV UPDATE #{uiUpdateCount}] UpdateUIFromNetwork called with: {data.ToString()}");
 
         isUpdatingFromNetwork = true;
 
@@ -221,12 +222,12 @@ public class TransformUIController : MonoBehaviour
             UpdateSliderAndText(scaleYSlider, scaleYText, data.scaleY);
             UpdateSliderAndText(scaleZSlider, scaleZText, data.scaleZ);
 
-            LogDebug($"[UPDATE] All UI elements updated successfully");
+            LogDebug($"[CSV UPDATE] All UI elements updated successfully from CSV");
             UpdateDebugDisplay();
         }
         catch (System.Exception e)
         {
-            LogError($"Error updating UI: {e.Message}");
+            LogError($"Error updating UI from CSV: {e.Message}");
         }
         finally
         {
@@ -249,7 +250,7 @@ public class TransformUIController : MonoBehaviour
     private void ResetToDefault()
     {
         TransformData defaultData = new TransformData();
-        LogDebug("[RESET] Resetting to default values");
+        LogDebug("[CSV RESET] Resetting to default values");
 
         UpdateUIFromNetwork(defaultData);
         SendCurrentData();
@@ -257,7 +258,7 @@ public class TransformUIController : MonoBehaviour
 
     private void SetTestValues()
     {
-        LogDebug("[TEST] Setting test values");
+        LogDebug("[CSV TEST] Setting test values");
 
         // 테스트용 값 설정
         positionXSlider.value = 5f;
@@ -272,7 +273,7 @@ public class TransformUIController : MonoBehaviour
         scaleYSlider.value = 1.5f;
         scaleZSlider.value = 1f;
 
-        LogDebug("[TEST] Test values set - sending to Scene1");
+        LogDebug("[CSV TEST] Test values set - sending CSV to Scene1");
         SendCurrentData();
     }
 
@@ -283,25 +284,27 @@ public class TransformUIController : MonoBehaviour
             slider.minValue = min;
             slider.maxValue = max;
         }
-    }
+    }    
 
     public void SetReceiver(TransformUIReceiver receiver)
     {
         this.receiver = receiver;
-        LogDebug($"[SETUP] Receiver set: {(receiver != null ? "OK" : "NULL")}");
+        LogDebug($"[CSV SETUP] Receiver set: {(receiver != null ? "OK" : "NULL")}");
     }
 
+    // Realtime에 따라 Button 및 자동 전송 비/활성화
     public void SetRealtimeSync(bool enable)
     {
         realtimeSync = enable;
-        LogDebug($"[SETTING] Realtime sync: {enable}");
+        if(sendButton != null) sendButton.interactable = !enable;
+        LogDebug($"[CSV SETTING] Realtime sync: {enable}");
     }
 
     private void UpdateDebugDisplay()
     {
         if (debugText != null)
         {
-            debugText.text = $"UI Updates: {uiUpdateCount} | Sent: {sentMessageCount} | Realtime: {realtimeSync}";
+            debugText.text = $"CSV Updates: {uiUpdateCount} | Sent: {sentMessageCount} | Realtime: {realtimeSync}";
         }
     }
 
@@ -309,12 +312,12 @@ public class TransformUIController : MonoBehaviour
     {
         if (enableDebugLogs)
         {
-            Debug.Log($"[SCENE2-UI] {message}");
+            Debug.Log($"[SCENE2-CSV-UI] {message}");
         }
     }
 
     private void LogError(string message)
     {
-        Debug.LogError($"[SCENE2-UI] {message}");
+        Debug.LogError($"[SCENE2-CSV-UI] {message}");
     }
 }

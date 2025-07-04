@@ -1,29 +1,22 @@
-using System;
-using System.Net;
-using System.Net.Sockets;
-using System.Text;
-using System.Threading;
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
 
 public class TransformController : MonoBehaviour
 {
-    [Header("Network Settings")]
-    public string targetIP = "10.244.88.65";
-    public int sendPort = 12222;
-    public int receivePort = 12223;
+    [Header("Network")]
+    public UDPManager udpManager;
 
     [Header("Transform Settings")]
     public Transform targetObject;
-    public float sendRate = 10f;  // 더 자주 전송하도록 변경
+    public float sendRate = 10f;
     public bool autoSend = true;
 
     [Header("UI")]
     public TMP_Text statusText;
     public Button testButton;
-    public Button moveObjectButton;  // 오브젝트 이동 테스트 버튼
-    public Button sendCurrentButton; // 현재 상태 전송 버튼
+    public Button moveObjectButton;
+    public Button sendCurrentButton;
     public TMP_InputField ipInputField;
     public Button connectButton;
     public Toggle autoSendToggle;
@@ -32,29 +25,34 @@ public class TransformController : MonoBehaviour
     public bool enableDebugLogs = true;
     public TMP_Text debugText;
 
-    // Network
-    private UdpClient udpClient;
-    private IPEndPoint sendEndPoint;
-    private Thread receiveThread;
-    private bool isReceiving = true;
+    [Header("Transform Monitoring")]
+    public float changeThreshold = 0.001f;  // 더 민감한 변경 감지
+    public bool forceUpdateEveryFrame = false;  // 매 프레임 강제 업데이트 (테스트용)
 
     // Transform sync
     private const string SENDER_ID = "SCENE1_CONTROLLER";
-    private TransformMessage lastReceivedMessage;
-    private bool hasNewMessage = false;
-    private bool isApplyingReceived = false;
-
-    // Auto send
     private TransformData lastSentData;
+    private TransformData currentTransformData;
     private float sendInterval;
     private float lastSendTime;
-    private int sentMessageCount = 0;
-    private int receivedMessageCount = 0;
+    private bool isApplyingReceived = false;
+
+    // Transform monitoring
+    private Vector3 lastPosition;
+    private Vector3 lastRotation;
+    private Vector3 lastScale;
+    private bool hasTransformChanged = false;
 
     private void Start()
     {
         InitializeComponents();
-        InitializeNetwork();
+        SetupNetworkEvents();
+
+        // 초기 Transform 상태 저장
+        if (targetObject != null)
+        {
+            StoreCurrentTransform();
+        }
 
         // 초기 전송을 위해 1초 후 한 번 전송
         Invoke(nameof(SendCurrentTransform), 1f);
@@ -70,9 +68,21 @@ public class TransformController : MonoBehaviour
             Debug.LogWarning("Target Object not assigned, using self transform");
         }
 
+        if (udpManager == null)
+        {
+            udpManager = FindFirstObjectByType<UDPManager>();
+
+            if (udpManager == null)
+            {
+                GameObject udpGO = new GameObject("UDPManager");
+                udpManager = udpGO.AddComponent<UDPManager>();
+            }
+        }
+
+        // UI 설정
         if (ipInputField != null)
         {
-            ipInputField.text = targetIP;
+            ipInputField.text = udpManager.targetIP;
         }
 
         // 버튼 이벤트 연결
@@ -105,127 +115,124 @@ public class TransformController : MonoBehaviour
         LogDebug("Components initialized");
     }
 
-    private void InitializeNetwork()
+    private void SetupNetworkEvents()
+    {
+        if (udpManager != null)
+        {
+            udpManager.OnDataReceived += OnDataReceived;
+            udpManager.OnNetworkError += OnNetworkError;
+            udpManager.OnNetworkConnected += OnNetworkConnected;
+            udpManager.OnNetworkDisconnected += OnNetworkDisconnected;
+        }
+    }
+
+    private void OnDataReceived(string csvData)
     {
         try
         {
-            sendEndPoint = new IPEndPoint(IPAddress.Parse(targetIP), sendPort);
-            udpClient = new UdpClient(receivePort);
+            LogDebug($"[RECEIVED CSV] {csvData}");
 
-            StartReceiveThread();
-            UpdateStatus("Network initialized - Ready for sync");
+            TransformMessage message = TransformMessage.FromCSV(csvData);
 
-            LogDebug($"Network initialized - Target: {targetIP}:{sendPort}, Listen: {receivePort}");
-        }
-        catch (Exception e)
-        {
-            UpdateStatus($"Network Error: {e.Message}");
-            LogError($"Network initialization failed: {e.Message}");
-        }
-    }
-
-    private void StartReceiveThread()
-    {
-        receiveThread = new Thread(ReceiveData);
-        receiveThread.IsBackground = true;
-        receiveThread.Start();
-
-        LogDebug("Receive thread started - Waiting for data from Scene2...");
-    }
-
-    private void ReceiveData()
-    {
-        while (isReceiving)
-        {
-            try
+            if (message != null && message.transformData != null && message.senderType == "SCENE2_UI")
             {
-                IPEndPoint remoteEndPoint = new IPEndPoint(IPAddress.Any, 0);
-                byte[] data = udpClient.Receive(ref remoteEndPoint);
-                string jsonData = Encoding.UTF8.GetString(data);
-
-                ProcessReceivedData(jsonData);
-            }
-            catch (Exception e)
-            {
-                if (isReceiving)
-                {
-                    LogError($"Receive failed: {e.Message}");
-                }
-            }
-        }
-    }
-
-    private void ProcessReceivedData(string jsonData)
-    {
-        try
-        {
-            receivedMessageCount++;
-            LogDebug($"[RECEIVED #{receivedMessageCount}] JSON: {jsonData}");
-
-            TransformMessage message = TransformMessage.FromJson(jsonData);
-
-            if (message == null)
-            {
-                LogError("Message is null after parsing");
-                return;
-            }
-
-            if (message.transformData == null)
-            {
-                LogError("Transform data is null");
-                return;
-            }
-
-            // Scene2에서 온 메시지만 처리
-            if (message.senderType == "SCENE2_UI")
-            {
-                lock (this)
-                {
-                    lastReceivedMessage = message;
-                    hasNewMessage = true;
-                }
-
                 LogDebug($"[VALID MESSAGE] From Scene2: {message.transformData.ToString()}");
-            }
-            else
-            {
-                LogDebug($"[IGNORED] Message from: {message.senderType}");
+                ApplyTransformToObject(message.transformData);
             }
         }
-        catch (Exception e)
+        catch (System.Exception e)
         {
-            LogError($"JSON Parse Error: {e.Message}");
-            LogError($"Raw JSON: {jsonData}");
+            LogError($"Error processing received data: {e.Message}");
         }
+    }
+
+    private void OnNetworkError(string error)
+    {
+        UpdateStatus($"Network Error: {error}");
+        LogError($"Network error: {error}");
+    }
+
+    private void OnNetworkConnected()
+    {
+        UpdateStatus("Network Connected");
+        LogDebug("Network connected");
+    }
+
+    private void OnNetworkDisconnected()
+    {
+        UpdateStatus("Network Disconnected");
+        LogDebug("Network disconnected");
     }
 
     private void Update()
     {
-        // 받은 데이터를 Target Object에 적용
-        ProcessReceivedMessages();
+        if (targetObject == null) return;
 
-        // 자동 전송 (오브젝트 변경 감지)
-        if (autoSend && !isApplyingReceived && Time.time - lastSendTime >= sendInterval)
+        // Transform 변경 감지
+        DetectTransformChanges();
+
+        // 자동 전송 처리
+        if (autoSend && !isApplyingReceived)
         {
-            CheckAndSendTransform();
-            lastSendTime = Time.time;
+            if (hasTransformChanged || forceUpdateEveryFrame)
+            {
+                if (Time.time - lastSendTime >= sendInterval)
+                {
+                    SendCurrentTransform();
+                    lastSendTime = Time.time;
+                }
+            }
         }
 
         // 디버그 정보 업데이트
         UpdateDebugDisplay();
     }
 
-    private void ProcessReceivedMessages()
+    private void DetectTransformChanges()
     {
-        if (hasNewMessage && lastReceivedMessage != null)
+        if (targetObject == null) return;
+
+        Vector3 currentPos = targetObject.position;
+        Vector3 currentRot = targetObject.eulerAngles;
+        Vector3 currentScale = targetObject.localScale;
+
+        // 변경 감지 (더 민감하게)
+        bool posChanged = Vector3.Distance(currentPos, lastPosition) > changeThreshold;
+        bool rotChanged = Vector3.Distance(currentRot, lastRotation) > changeThreshold;
+        bool scaleChanged = Vector3.Distance(currentScale, lastScale) > changeThreshold;
+
+        if (posChanged || rotChanged || scaleChanged)
         {
-            lock (this)
+            hasTransformChanged = true;
+
+            if (enableDebugLogs)
             {
-                LogDebug("[APPLYING] Received data to target object...");
-                ApplyTransformToObject(lastReceivedMessage.transformData);
-                hasNewMessage = false;
+                if (posChanged) LogDebug($"[CHANGE DETECTED] Position: {lastPosition} → {currentPos}");
+                if (rotChanged) LogDebug($"[CHANGE DETECTED] Rotation: {lastRotation} → {currentRot}");
+                if (scaleChanged) LogDebug($"[CHANGE DETECTED] Scale: {lastScale} → {currentScale}");
             }
+
+            // 현재 값 저장
+            lastPosition = currentPos;
+            lastRotation = currentRot;
+            lastScale = currentScale;
         }
+        else
+        {
+            hasTransformChanged = false;
+        }
+    }
+
+    private void StoreCurrentTransform()
+    {
+        if (targetObject == null) return;
+
+        lastPosition = targetObject.position;
+        lastRotation = targetObject.eulerAngles;
+        lastScale = targetObject.localScale;
+
+        currentTransformData = new TransformData(targetObject);
+        LogDebug($"[STORED] Current transform: {currentTransformData.ToString()}");
     }
 
     private void ApplyTransformToObject(TransformData data)
@@ -243,7 +250,10 @@ public class TransformController : MonoBehaviour
         targetObject.eulerAngles = data.GetRotation();
         targetObject.localScale = data.GetScale();
 
-        LogDebug($"[APPLIED] Transform changed:");
+        // 저장된 값도 업데이트 (중복 전송 방지)
+        StoreCurrentTransform();
+
+        LogDebug($"[APPLIED CSV] Transform changed:");
         LogDebug($"  Position: {oldPos} → {targetObject.position}");
         LogDebug($"  Rotation: {oldRot} → {targetObject.eulerAngles}");
         LogDebug($"  Scale: {oldScale} → {targetObject.localScale}");
@@ -260,27 +270,23 @@ public class TransformController : MonoBehaviour
         LogDebug("[RESET] Apply flag reset - Auto send enabled again");
     }
 
-    private void CheckAndSendTransform()
-    {
-        if (targetObject == null || isApplyingReceived) return;
-
-        TransformData currentData = new TransformData(targetObject);
-
-        // 데이터가 변경된 경우에만 전송
-        if (lastSentData == null || HasDataChanged(currentData, lastSentData))
-        {
-            LogDebug("[AUTO SEND] Object transform changed - Sending to Scene2");
-            SendTransformData(currentData);
-        }
-    }
-
     private void SendCurrentTransform()
     {
         if (targetObject == null) return;
 
         TransformData currentData = new TransformData(targetObject);
-        LogDebug("[MANUAL SEND] Sending current transform to Scene2");
-        SendTransformData(currentData);
+
+        // 데이터가 실제로 변경되었는지 확인
+        if (lastSentData == null || HasDataChanged(currentData, lastSentData))
+        {
+            LogDebug($"[SENDING] Current transform to Scene2: {currentData.ToString()}");
+            SendTransformData(currentData);
+            hasTransformChanged = false;  // 전송 후 플래그 리셋
+        }
+        else
+        {
+            LogDebug("[SKIPPED] No significant changes detected");
+        }
     }
 
     private void ForceSendCurrent()
@@ -290,50 +296,32 @@ public class TransformController : MonoBehaviour
         TransformData currentData = new TransformData(targetObject);
         LogDebug("[FORCE SEND] Force sending current transform to Scene2");
         SendTransformData(currentData);
+        hasTransformChanged = false;
     }
 
     private void SendTransformData(TransformData data)
     {
         TransformMessage message = new TransformMessage(data, SENDER_ID);
-        SendMessage(message);
-        lastSentData = data;
+        string csvData = message.ToCSV();
+
+        if (udpManager != null)
+        {
+            udpManager.SendData(csvData);
+            lastSentData = data;
+            UpdateStatus($"Sent CSV to Scene2: {data.ToString()}");
+            LogDebug($"[SENT CSV] {csvData}");
+        }
+        else
+        {
+            LogError("UDP Manager is null!");
+        }
     }
 
     private bool HasDataChanged(TransformData current, TransformData last)
     {
-        float threshold = 0.01f;
-        bool changed = Vector3.Distance(current.GetPosition(), last.GetPosition()) > threshold ||
-                      Vector3.Distance(current.GetRotation(), last.GetRotation()) > threshold ||
-                      Vector3.Distance(current.GetScale(), last.GetScale()) > threshold;
-
-        if (changed)
-        {
-            LogDebug($"[CHANGE DETECTED] Transform changed beyond threshold ({threshold})");
-        }
-
-        return changed;
-    }
-
-    private void SendMessage(TransformMessage message)
-    {
-        try
-        {
-            string jsonData = message.ToJson();
-            sentMessageCount++;
-
-            LogDebug($"[SENDING #{sentMessageCount}] To Scene2 ({targetIP}:{sendPort}):");
-            LogDebug($"[SENDING JSON] {jsonData}");
-
-            byte[] bytes = Encoding.UTF8.GetBytes(jsonData);
-            udpClient.Send(bytes, bytes.Length, sendEndPoint);
-
-            LogDebug($"[SENT] {bytes.Length} bytes successfully sent");
-            UpdateStatus($"Sent to Scene2: {message.transformData.ToString()}");
-        }
-        catch (Exception e)
-        {
-            LogError($"Send failed: {e.Message}");
-        }
+        return Vector3.Distance(current.GetPosition(), last.GetPosition()) > changeThreshold ||
+               Vector3.Distance(current.GetRotation(), last.GetRotation()) > changeThreshold ||
+               Vector3.Distance(current.GetScale(), last.GetScale()) > changeThreshold;
     }
 
     // 테스트 메서드들
@@ -341,7 +329,6 @@ public class TransformController : MonoBehaviour
     {
         if (targetObject == null) return;
 
-        // 랜덤 위치로 이동
         Vector3 randomPos = new Vector3(
             UnityEngine.Random.Range(-10f, 10f),
             UnityEngine.Random.Range(-5f, 5f),
@@ -351,7 +338,7 @@ public class TransformController : MonoBehaviour
         targetObject.position = randomPos;
         LogDebug($"[TEST] Moved object to: {randomPos}");
 
-        // 즉시 전송
+        // 테스트 시에는 즉시 전송
         ForceSendCurrent();
     }
 
@@ -363,12 +350,10 @@ public class TransformController : MonoBehaviour
 
     private void UpdateTargetIP()
     {
-        if (ipInputField != null)
+        if (ipInputField != null && udpManager != null)
         {
-            targetIP = ipInputField.text;
-            sendEndPoint = new IPEndPoint(IPAddress.Parse(targetIP), sendPort);
-            UpdateStatus($"Target IP updated to: {targetIP}");
-            LogDebug($"Target IP updated to: {targetIP}");
+            udpManager.UpdateTargetIP(ipInputField.text);
+            UpdateStatus($"Target IP updated to: {ipInputField.text}");
         }
     }
 
@@ -382,9 +367,10 @@ public class TransformController : MonoBehaviour
 
     private void UpdateDebugDisplay()
     {
-        if (debugText != null)
+        if (debugText != null && udpManager != null)
         {
-            debugText.text = $"Sent: {sentMessageCount} | Received: {receivedMessageCount} | Auto: {autoSend}";
+            string changeStatus = hasTransformChanged ? "CHANGED" : "STABLE";
+            debugText.text = $"Auto: {autoSend} | Status: {changeStatus} | {udpManager.GetStatusInfo()}";
         }
     }
 
@@ -401,13 +387,15 @@ public class TransformController : MonoBehaviour
         Debug.LogError($"[SCENE1-CONTROLLER] {message}");
     }
 
-    private void OnApplicationQuit()
+    private void OnDestroy()
     {
-        isReceiving = false;
-        receiveThread?.Join(1000);
-        udpClient?.Close();
-
-        LogDebug("Application quit - Network closed");
+        if (udpManager != null)
+        {
+            udpManager.OnDataReceived -= OnDataReceived;
+            udpManager.OnNetworkError -= OnNetworkError;
+            udpManager.OnNetworkConnected -= OnNetworkConnected;
+            udpManager.OnNetworkDisconnected -= OnNetworkDisconnected;
+        }
     }
 
     // 컨텍스트 메뉴
@@ -423,17 +411,17 @@ public class TransformController : MonoBehaviour
         TestMoveObject();
     }
 
-    [ContextMenu("Print Network Status")]
-    public void PrintNetworkStatus()
+    [ContextMenu("Enable Force Update")]
+    public void EnableForceUpdate()
     {
-        LogDebug($"=== SCENE1 NETWORK STATUS ===");
-        LogDebug($"Target: {targetIP}:{sendPort}");
-        LogDebug($"Listen: {receivePort}");
-        LogDebug($"Auto Send: {autoSend}");
-        LogDebug($"Send Rate: {sendRate}");
-        LogDebug($"Sent Messages: {sentMessageCount}");
-        LogDebug($"Received Messages: {receivedMessageCount}");
-        LogDebug($"Target Object: {(targetObject != null ? targetObject.name : "NULL")}");
-        LogDebug($"==============================");
+        forceUpdateEveryFrame = true;
+        LogDebug("Force update every frame enabled");
+    }
+
+    [ContextMenu("Disable Force Update")]
+    public void DisableForceUpdate()
+    {
+        forceUpdateEveryFrame = false;
+        LogDebug("Force update every frame disabled");
     }
 }

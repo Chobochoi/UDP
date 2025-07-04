@@ -391,56 +391,6 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 109229088}
   m_CullTransparentMesh: 1
---- !u!1 &148770763
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 148770765}
-  - component: {fileID: 148770764}
-  m_Layer: 0
-  m_Name: Test
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 0
---- !u!114 &148770764
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 148770763}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 8ebbfd1db7ad2f9428a53d3c91aca6a2, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  targetIP: 127.0.0.1
-  sendPort: 22666
-  receivePort: 22668
-  sendButton: {fileID: 366350033}
-  statusText: {fileID: 896370864}
-  messageInput: {fileID: 908034544}
---- !u!4 &148770765
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 148770763}
-  serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 608.0587, y: 0, z: 1441.1492}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
-  m_Children: []
-  m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &320509331
 GameObject:
   m_ObjectHideFlags: 0
@@ -1185,10 +1135,21 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a1f168b414ebbd54eb59e813b403e6db, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  targetObject: {fileID: 1241032294}
   moveSpeed: 5
-  rotateSpeed: 50
+  rotationSpeed: 90
   scaleSpeed: 1
+  enableKeyboard: 1
+  enableGamepad: 1
+  gamepadSensitivity: 1
+  triggerSensitivity: 1
+  stickDeadzone: 0.1
+  resetButton: 330
+  scaleUpButton: 331
+  scaleDownButton: 332
+  sendButton: 333
+  targetObject: {fileID: 1241032294}
+  showDebugInfo: 1
+  enableDebugLogs: 0
 --- !u!4 &706611526
 Transform:
   m_ObjectHideFlags: 0
@@ -1248,9 +1209,10 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: e249ed35c7432b34f88fa0a8512f2bde, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  targetIP: 127.0.0.1
+  targetIP: 10.244.88.252
   sendPort: 19912
   receivePort: 19911
+  enableDebugLogs: 1
 --- !u!1 &802718668
 GameObject:
   m_ObjectHideFlags: 0
@@ -1733,9 +1695,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 8f0217f9e47679243b491eccd2ec932e, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  targetIP: 127.0.0.1
-  sendPort: 19912
-  receivePort: 19911
+  udpManager: {fileID: 723172987}
   targetObject: {fileID: 1241032294}
   sendRate: 30
   autoSend: 1
@@ -1748,6 +1708,8 @@ MonoBehaviour:
   autoSendToggle: {fileID: 1803203274}
   enableDebugLogs: 1
   debugText: {fileID: 638280735}
+  changeThreshold: 0.001
+  forceUpdateEveryFrame: 0
 --- !u!1 &953199306
 GameObject:
   m_ObjectHideFlags: 0
@@ -3077,5 +3039,4 @@ SceneRoots:
   - {fileID: 945160768}
   - {fileID: 706611526}
   - {fileID: 723172986}
-  - {fileID: 148770765}
   - {fileID: 647013053}
