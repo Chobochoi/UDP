@@ -14,8 +14,8 @@ public class TransformController : MonoBehaviour
 
     [Header("UI")]
     public TMP_Text statusText;
-    public Button testButton;
-    public Button moveObjectButton;
+    //public Button testButton;
+    //public Button moveObjectButton;
     public Button sendCurrentButton;
     public TMP_InputField ipInputField;
     public Button connectButton;
@@ -85,16 +85,17 @@ public class TransformController : MonoBehaviour
             ipInputField.text = udpManager.targetIP;
         }
 
-        // 버튼 이벤트 연결
-        if (testButton != null)
-        {
-            testButton.onClick.AddListener(SendCurrentTransform);
-        }
+        // 테스트를 위한 버튼 이벤트 연결
+        // 테스트 완료하여 주석처리
+        //if (testButton != null)
+        //{
+        //    testButton.onClick.AddListener(SendCurrentTransform);
+        //}
 
-        if (moveObjectButton != null)
-        {
-            moveObjectButton.onClick.AddListener(TestMoveObject);
-        }
+        //if (moveObjectButton != null)
+        //{
+        //    moveObjectButton.onClick.AddListener(TestMoveObject);
+        //}
 
         if (sendCurrentButton != null)
         {
@@ -289,7 +290,7 @@ public class TransformController : MonoBehaviour
         }
     }
 
-    private void ForceSendCurrent()
+    public void ForceSendCurrent()
     {
         if (targetObject == null) return;
 
@@ -345,6 +346,7 @@ public class TransformController : MonoBehaviour
     private void SetAutoSend(bool enabled)
     {
         autoSend = enabled;
+        if (sendCurrentButton != null) sendCurrentButton.interactable = !enabled;
         LogDebug($"[SETTING] Auto send: {enabled}");
     }
 

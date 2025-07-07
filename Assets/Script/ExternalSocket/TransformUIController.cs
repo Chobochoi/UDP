@@ -214,6 +214,7 @@ public class TransformUIController : MonoBehaviour
 
             // Rotation 업데이트
             UpdateSliderAndText(rotationXSlider, rotationXText, data.rotX);
+            UpdateSliderAndText(rotationXSlider, rotationXText, data.rotX);
             UpdateSliderAndText(rotationYSlider, rotationYText, data.rotY);
             UpdateSliderAndText(rotationZSlider, rotationZText, data.rotZ);
 
